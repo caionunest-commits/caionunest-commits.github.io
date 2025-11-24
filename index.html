@@ -69,12 +69,11 @@
 
     <!-- EXEMPLO DE POSTAGEM 1 -->
     <div class="post">
-        <h2>Atividade 1 — Nome da atividade</h2>
-        <p>Descrição rápida da atividade.</p>
+        <h2>Atividade 1 —  Atividade: Cotação do Dólar – Março de 2016 </h2>
+        <p>Código atividade.</p>
 
         <pre><code>
 
-# Atividade: Cotação do Dólar – Março de 2016
 
 
 import calendar             
@@ -262,20 +261,217 @@ if __name__ == "__main__":
         </code></pre>
     </div>
 
-    <!-- EXEMPLO DE POSTAGEM 2 -->
     <div class="post">
-        <h2>Atividade 2 — Outro exercício</h2>
-        <p>Outro texto explicando o que você fez.</p>
+        <h2>Atividade 2 </h2>
+        <p>Api onibus</p>
 
         <pre><code>
-# Outro código Python
-for i in range(1, 6):
-    print("Número:", i)
+import os
+import requests
+from dotenv import load_dotenv
+import folium
+
+# Carrega as variáveis de ambiente do arquivo sptrans.env
+load_dotenv("sptrans.env")
+SPTRANS_TOKEN = os.getenv("SPTRANS_TOKEN")
+
+# Verifica se o token foi carregado corretamente
+if not SPTRANS_TOKEN:
+    raise ValueError("Token SPTRANS_TOKEN não encontrado em sptrans.env")
+
+# URL base da API Olho Vivo da SPTrans
+BASE_URL = "http://api.olhovivo.sptrans.com.br/v2.1"
+
+
+def autenticar():
+    # Cria uma sessão HTTP para manter a autenticação
+    s = requests.Session()
+    # Faz o POST na rota de autenticação usando o token
+    res = s.post(f"{BASE_URL}/Login/Autenticar?token={SPTRANS_TOKEN}")
+    # Confere se a API retornou "true" (autenticado)
+    if res.text.lower() != "true":
+        raise RuntimeError(f"Falha na autenticação: {res.text}")
+    print("Autenticação OK.")
+    # Retorna a sessão já autenticada para reutilizar nas próximas requisições
+    return s
+
+
+def buscar_linha_148L(sessao):
+    # Busca as linhas que combinem com o termo "148L"
+    res = sessao.get(f"{BASE_URL}/Linha/Buscar?termosBusca=148L")
+    linhas = res.json()
+
+    # Se não vier nenhuma linha, dispara erro
+    if not linhas:
+        raise RuntimeError("Nenhuma linha encontrada para o termo 148L")
+
+    # Mostra no console as linhas retornadas para conferência
+    print("Linhas retornadas para '148L':")
+    for l in linhas:
+        print(l)
+
+    linha_escolhida = None
+    # Tenta selecionar especificamente a linha cujo código curto (lt) é "148L"
+    for l in linhas:
+        if l.get("lt") == "148L":
+            linha_escolhida = l
+            break
+
+    # Se não achar exatamente "148L", pega a primeira da lista mesmo
+    if linha_escolhida is None:
+        linha_escolhida = linhas[0]
+
+    print("\nLinha selecionada:")
+    print(linha_escolhida)
+
+    # Retorna o código da linha (cl) e o dicionário completo da linha
+    return linha_escolhida["cl"], linha_escolhida
+
+
+def buscar_paradas_por_linha(sessao, codigo_linha):
+    # Monta a URL para buscar as paradas associadas à linha
+    url = f"{BASE_URL}/Parada/BuscarParadasPorLinha?codigoLinha={codigo_linha}"
+    res = sessao.get(url)
+    paradas = res.json()
+
+    # Mostra a quantidade de paradas retornadas
+    print(f"Quantidade de paradas encontradas: {len(paradas)}")
+
+    # Se não vier nenhuma parada, gera erro
+    if not paradas:
+        raise RuntimeError(f"Nenhuma parada encontrada para a linha código {codigo_linha}.")
+
+    # Retorna a lista de paradas (cada parada é um dicionário com dados da API)
+    return paradas
+
+
+def gerar_mapa_paradas(paradas, nome_linha, arquivo_saida="mapa_paradas_148L.html"):
+    # Calcula a latitude e longitude médias para centralizar o mapa
+    med_lat = sum(p["py"] for p in paradas) / len(paradas)
+    med_lon = sum(p["px"] for p in paradas) / len(paradas)
+
+    # Cria o mapa centrado na média das coordenadas das paradas
+    m = folium.Map(location=[med_lat, med_lon], zoom_start=14)
+
+    # Percorre cada parada e adiciona um marcador no mapa
+    for p in paradas:
+        lat = p["py"]
+        lon = p["px"]
+        nome = p.get("np", "Parada sem nome")  # nome da parada
+        endereco = p.get("ed", "")            # endereço da parada
+
+        # Texto que aparece no popup quando clica no marcador
+        popup_text = f"{nome}<br>{endereco}"
+
+        # Cria o marcador azul com ícone de informação
+        folium.Marker(
+            location=[lat, lon],
+            popup=popup_text,
+            icon=folium.Icon(color="blue", icon="info-sign")
+        ).add_to(m)
+
+    # Salva o mapa como um arquivo HTML
+    m.save(arquivo_saida)
+    print(f"Mapa de paradas salvo em: {arquivo_saida}")
+
+
+def main():
+    # Autentica na API e obtém a sessão
+    sessao = autenticar()
+
+    # Busca a linha 148L e pega o código interno dela
+    codigo_linha, dados_linha = buscar_linha_148L(sessao)
+
+    # Monta uma string com o nome da linha, tipo e sentido
+    nome_linha = f"{dados_linha.get('lt', '')} - {dados_linha.get('tp', '')} / {dados_linha.get('ts', '')}"
+
+    # Busca todas as paradas associadas a essa linha
+    paradas = buscar_paradas_por_linha(sessao, codigo_linha)
+
+    # Gera o mapa com todas as paradas dessa linha
+    gerar_mapa_paradas(paradas, nome_linha)
+
+
+# Ponto de entrada do script: só roda main() se o arquivo for executado diretamente
+if __name__ == "__main__":
+    main()
         </code></pre>
     </div>
 
 </div>
 
+    <div class="post">
+        <h2>Atividade 3</h2>
+        <p>Regressão Linear.</p>
+
+        <pre><code>
+import numpy as np
+import pandas as pd
+from plotnine import (
+    ggplot, aes, geom_point, geom_abline, theme, element_text, ggsave
+)
+
+# Importo as bibliotecas necessárias
+
+valores_x = np.loadtxt("X.txt")
+valores_y = np.loadtxt("y.txt")
+
+# Carrego os dados de x e y dos arquivos de texto
+
+X = valores_x.reshape(-1, 1)
+y = valores_y.reshape(-1, 1)
+
+# Ajusto os vetores para formato de coluna (matriz n x 1)
+
+ones = np.ones((X.shape[0], 1))
+X_design = np.hstack([ones, X])
+
+# Crio a matriz de projeto da regressão: primeira coluna de 1s e segunda com x
+
+XT = X_design.T
+XTX = XT @ X_design
+XTX_inv = np.linalg.inv(XTX)
+XTy = XT @ y
+beta = XTX_inv @ XTy
+
+# Calculo os coeficientes da regressão linear usando a fórmula matricial
+
+a = float(beta[0, 0])
+b = float(beta[1, 0])
+
+# Separo o intercepto (a) e a inclinação (b) da reta
+
+df = pd.DataFrame({
+    "x": valores_x,
+    "y": valores_y
+})
+
+# Coloco os dados em um DataFrame para facilitar o uso no gráfico
+
+plot = (
+    ggplot(df, aes("x", "y"))
+    + geom_point(color="blue", size=2)              # pontos observados
+    + geom_abline(intercept=a, slope=b, color="red")  # reta de regressão
+    + theme(
+        figure_size=(6, 4),
+        axis_title_x=element_text(size=12),
+        axis_title_y=element_text(size=12),
+        title=element_text(size=14, weight="bold")
+    )
+)
+
+# Crio o gráfico com os pontos e a reta ajustada
+
+ggsave(plot, "grafico_regressao.png", dpi=300)
+
+# Salvo o gráfico em um arquivo PNG
+
+plot
+# Exibo o gráfico
+        </code></pre>
+    </div>
+
+</div>
 <footer>
     © 2025 — Blog de Atividades em Python
 </footer>
