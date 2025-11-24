@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
@@ -73,11 +73,192 @@
         <p>Descrição rápida da atividade.</p>
 
         <pre><code>
-# Cole seu código Python aqui
-def somar(a, b):
-    return a + b
 
-print(somar(2, 3))
+# Atividade: Cotação do Dólar – Março de 2016
+
+
+import calendar             
+from datetime import datetime
+import requests              
+import pandas as pd          
+import plotly.express as px  
+
+
+def gerar_grafico_dolar_marco_2016():
+    # ------------------------------------------------------------
+    # 1. Definindo o mês e o ano que eu quero analisar
+    # ------------------------------------------------------------
+    # O professor pediu pra usar o formato "MMYYYY".
+    # No meu caso: 03 (março) e 2016.
+    mmYYYY = "032016"
+
+    # Aqui eu transformo essa string em uma data de verdade.
+    # "%m%Y" significa: mês com 2 dígitos + ano com 4 dígitos.
+    # Isso vai virar 01/03/2016 automaticamente.
+    first_date = datetime.strptime(mmYYYY, "%m%Y")
+
+    # Agora eu preciso saber qual é o último dia de março de 2016.
+    last_day = calendar.monthrange(first_date.year, first_date.month)[1]
+
+    # Aqui eu pego a primeira data (01/03/2016) e só troco o "dia"
+    # para o último dia do mês (31).
+    last_date = first_date.replace(day=last_day)
+
+    # A API do Banco Central só aceita data formato americano
+
+    data_inicial_str = first_date.strftime("%m-%d-%Y")
+    data_final_str = last_date.strftime("%m-%d-%Y")
+
+    # ------------------------------------------------------------
+    # 2. Montando a URL da API do Banco Central (PTAX)
+    # ------------------------------------------------------------
+    # "CotacaoDolarPeriodo", que recebe data inicial e final.
+    base_url = "https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/"
+    endpoint = "CotacaoDolarPeriodo(dataInicial=@dataInicial,dataFinalCotacao=@dataFinalCotacao)"
+
+    # Aqui eu monto a "query string", que são os parâmetros que vão
+    # depois da interrogação na URL. Basicamente estou falando:
+    # - qual o intervalo de datas
+    # - que eu quero o resultado em JSON
+    # - e que colunas eu quero pegar da resposta.
+    params = (
+        f"@dataInicial='{data_inicial_str}'&"
+        f"@dataFinalCotacao='{data_final_str}'&"
+        "$top=1000&$format=json&"
+        "$select=cotacaoCompra,cotacaoVenda,dataHoraCotacao"
+    )
+
+    # Junto tudo pra virar uma URL completa.
+    url = base_url + endpoint + "?" + params
+
+    # ------------------------------------------------------------
+    # 3. Chamando a API de verdade
+    # ------------------------------------------------------------
+    # Aqui eu realmente mando a requisição pro servidor do Banco Central.
+    response = requests.get(url)
+
+    # Se der algum erro (tipo URL errada, servidor fora do ar, etc.),
+    # essa linha abaixo já estoura um erro pra eu perceber.
+    response.raise_for_status()
+
+    # O retorno vem em formato JSON. Dentro dele existe uma chave
+    # chamada "value" que é onde estão os dados que eu quero.
+    dados = response.json()["value"]
+
+    # Se por algum motivo não vier nada, eu já aviso.
+    if not dados:
+        raise ValueError("Nenhum dado retornado pela API para março de 2016.")
+
+    # ------------------------------------------------------------
+    # 4. Jogando os dados pra um DataFrame (tabela) do pandas
+    # ------------------------------------------------------------
+    # Transformo a lista de dicionários em uma tabela, que é bem
+    # mais fácil de mexer.
+    df = pd.DataFrame(dados)
+
+    # A coluna "dataHoraCotacao" está como texto. Aqui eu transformo
+    # em data/hora de verdade, pra conseguir filtrar, ordenar, etc.
+    df["dataHoraCotacao"] = pd.to_datetime(df["dataHoraCotacao"])
+
+    # Crio uma coluna só com a data (sem o horário), porque no final
+    # eu quero uma linha por dia, não por horário.
+    df["data"] = df["dataHoraCotacao"].dt.date
+
+    # Pode acontecer de ter mais de uma cotação no mesmo dia,
+    # em horários diferentes. Pra simplificar, escolhi pegar
+    # a última cotação do dia.
+    df = (
+        df.sort_values("dataHoraCotacao")                # ordeno pela hora
+          .groupby("data")                               # agrupo por dia
+          .agg({
+              "cotacaoCompra": "last",                   # pego a última compra
+              "cotacaoVenda": "last"                     # e a última venda
+          })
+          .reset_index()
+    )
+
+    # ------------------------------------------------------------
+    # 5. Lidando com finais de semana e feriados
+    # ------------------------------------------------------------
+    # O enunciado fala que, se não tiver cotação num dia (por ser
+    # fim de semana ou feriado), eu devo usar o valor do dia útil
+    # anterior. 
+
+    # Primeiro, crio um intervalo de datas contínuo:
+    datas_completas = pd.date_range(
+        start=first_date.date(),
+        end=last_date.date(),
+        freq="D"   # D = diário (todo dia)
+    )
+
+    # Coloco essas datas em um DataFrame, só com uma coluna "data".
+    df_completo = pd.DataFrame({"data": datas_completas})
+
+    # Agora faço um "merge" entre:
+    # - df_completo: todas as datas de março
+    # - df: só os dias que têm cotação
+    #
+    # how="left" garante que nenhuma data de df_completo será perdida.
+    df_merged = df_completo.merge(df, on="data", how="left")
+
+    # Depois do merge, os dias sem cotação vão ficar com NaN nas
+    # colunas de compra e venda. Aqui eu faço o famoso "ffill"
+    # (forward fill), que basicamente copia o último valor válido
+    # pra frente.
+    df_merged[["cotacaoCompra", "cotacaoVenda"]] = (
+        df_merged[["cotacaoCompra", "cotacaoVenda"]].fillna(method="ffill")
+    )
+
+    # Pode acontecer do primeiro dia do mês ainda ficar vazio
+    # (por exemplo, se começar com feriado). Nesse caso eu uso o
+    # "bfill" (backward fill), que faz o contrário: pega o primeiro
+    # valor que aparece depois e preenche pra trás.
+    df_merged[["cotacaoCompra", "cotacaoVenda"]] = (
+        df_merged[["cotacaoCompra", "cotacaoVenda"]].fillna(method="bfill")
+    )
+
+    # ------------------------------------------------------------
+    # 6. Finalmente, gerando o gráfico com Plotly
+    # ------------------------------------------------------------
+    # Agora que eu tenho uma série certinha, com um valor por dia,
+    # dá pra plotar e ver visualmente como o dólar se comportou
+    # ao longo de março de 2016.
+    fig = px.line(
+        df_merged,
+        x="data",                                  # eixo X: datas
+        y=["cotacaoCompra", "cotacaoVenda"],      # eixo Y: duas linhas (compra e venda)
+        title="Cotação do Dólar - Março de 2016",
+        labels={
+            "value": "Cotação em R$",
+            "data": "Data",
+            "variable": "Tipo de cotação"
+        },
+    )
+
+    # Só deixando o gráfico um pouco mais organizado:
+    fig.update_layout(
+        xaxis_title="Data",
+        yaxis_title="Cotação do dólar (R$)",
+        legend_title="",          # legenda sem título
+        hovermode="x unified"     # quando passa o mouse, mostra compra e venda juntos
+    )
+
+    # Mostra o gráfico na tela.
+    fig.show()
+
+    # Retorno o DataFrame final caso eu queira olhar os números
+    # em forma de tabela depois.
+    return df_merged
+
+
+# ------------------------------------------------------------
+# 7. Rodando o código
+# ------------------------------------------------------------
+# Se eu executar esse arquivo direto,
+# essa parte aqui embaixo é que vai rodar, chamando a função que
+# monta tudo e mostra o gráfico.
+if __name__ == "__main__":
+    gerar_grafico_dolar_marco_2016()
         </code></pre>
     </div>
 
